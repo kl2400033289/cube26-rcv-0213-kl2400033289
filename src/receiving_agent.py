@@ -144,6 +144,12 @@ def inspect_receiving(receiving_data, images):
         # -----------------------------------------------------
         # ONE GEMINI MODEL CALL
         # -----------------------------------------------------
+        import time
+
+response = None
+
+for attempt in range(4):
+    try:
         response = client.models.generate_content(
             model=MODEL_NAME,
             contents=[prompt] + images,
@@ -152,6 +158,18 @@ def inspect_receiving(receiving_data, images):
                 max_output_tokens=1500,
             ),
         )
+        break
+
+    except Exception as exc:
+        error_text = str(exc)
+
+        if "503" not in error_text and "UNAVAILABLE" not in error_text:
+            raise
+
+        if attempt == 3:
+            raise
+
+        time.sleep(2 ** attempt)
 
         # -----------------------------------------------------
         # READ MODEL RESPONSE
