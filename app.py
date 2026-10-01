@@ -9,6 +9,7 @@ import streamlit as st
 from PIL import Image
 
 from src.receiving_agent import inspect_receiving
+from src.database import get_receiving_records
 
 init_db()
 
@@ -351,6 +352,32 @@ if "last_result" in st.session_state:
             "Review the evidence before accepting the delivery.",
         )
     )
+    st.divider()
+
+st.header("Receiving History")
+
+records = get_receiving_records()
+
+if records:
+    history = []
+
+    for record in records:
+        history.append({
+            "Record ID": record["record_id"],
+            "Unit ID": record["unit_id"],
+            "PO Number": record["po_number"],
+            "SKU": record["sku"],
+            "Product": record["product_title"],
+            "Verdict": record["overall_verdict"],
+            "Captured At": record["captured_at"]
+        })
+
+    st.dataframe(
+        pd.DataFrame(history),
+        use_container_width=True
+    )
+else:
+    st.info("No receiving records yet.")
 
     # -----------------------------------------------------
     # Evidence record
