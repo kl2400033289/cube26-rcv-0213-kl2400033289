@@ -2,12 +2,15 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from src.database import init_db, save_receiving_record
 
 import pandas as pd
 import streamlit as st
 from PIL import Image
 
 from src.receiving_agent import inspect_receiving
+
+init_db()
 
 
 st.set_page_config(
