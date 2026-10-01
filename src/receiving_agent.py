@@ -6,7 +6,8 @@ from google import genai
 from google.genai import types
 
 
-MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+# Use the current Gemini model explicitly.
+MODEL_NAME = "gemini-3.8-flash"
 
 
 def build_prompt(receiving_data):
@@ -98,6 +99,9 @@ def inspect_receiving(receiving_data, images):
 
     api_key = os.getenv("GEMINI_API_KEY")
 
+    # ---------------------------------------------------------
+    # API KEY CHECK
+    # ---------------------------------------------------------
     if not api_key:
         return {
             "status": "pending",
@@ -127,23 +131,44 @@ def inspect_receiving(receiving_data, images):
         }
 
     try:
+        # -----------------------------------------------------
+        # CREATE GEMINI CLIENT
+        # -----------------------------------------------------
         client = genai.Client(api_key=api_key)
 
+        # -----------------------------------------------------
+        # BUILD PROMPT
+        # -----------------------------------------------------
         prompt = build_prompt(receiving_data)
 
-        # ONE model call for the complete unit.
+        # -----------------------------------------------------
+        # ONE GEMINI MODEL CALL
+        # -----------------------------------------------------
         response = client.models.generate_content(
             model=MODEL_NAME,
             contents=[prompt] + images,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
-                temperature=0.1,
                 max_output_tokens=1500,
             ),
         )
 
-        result = json.loads(response.text)
+        # -----------------------------------------------------
+        # READ MODEL RESPONSE
+        # -----------------------------------------------------
+        response_text = response.text
 
+        if not response_text:
+            raise ValueError("Gemini returned an empty response.")
+
+        # -----------------------------------------------------
+        # PARSE JSON
+        # -----------------------------------------------------
+        result = json.loads(response_text)
+
+        # -----------------------------------------------------
+        # ADD SYSTEM METADATA
+        # -----------------------------------------------------
         result["status"] = "completed"
         result["model"] = MODEL_NAME
         result["inspected_at"] = datetime.now(timezone.utc).isoformat()
@@ -151,30 +176,42 @@ def inspect_receiving(receiving_data, images):
         return result
 
     except Exception as exc:
-        # Fail-open: preserve the capture and move it to review.
+        # -----------------------------------------------------
+        # FAIL-OPEN:
+        # Preserve the receiving capture and request review.
+        # -----------------------------------------------------
         return {
             "status": "pending",
             "error": str(exc),
+
             "identity": {
                 "verdict": "UNCERTAIN",
                 "evidence": "Inspection could not be completed."
             },
+
             "quantity": {
                 "verdict": "UNCERTAIN",
                 "evidence": "Inspection could not be completed."
             },
+
             "carton_damage": {
                 "verdict": "UNCERTAIN",
                 "evidence": "Inspection could not be completed."
             },
+
             "unit_damage": {
                 "verdict": "UNCERTAIN",
                 "evidence": "Inspection could not be completed."
             },
+
             "quality": {
                 "verdict": "UNCERTAIN",
                 "evidence": "Inspection could not be completed."
             },
+
             "overall_verdict": "REVIEW_REQUIRED",
-            "summary": "The receiving capture was preserved and requires human review.",
+
+            "summary": (
+                "The receiving capture was preserved and requires human review."
+            )
         }
