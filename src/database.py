@@ -52,7 +52,7 @@ def save_receiving_record(record):
     conn = get_connection()
 
     conn.execute("""
-        INSERT OR REPLACE INTO receiving_records (
+        INSERT INTO receiving_records (
             record_id,
             unit_id,
             org_id,
