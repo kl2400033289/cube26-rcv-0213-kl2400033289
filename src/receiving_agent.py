@@ -94,7 +94,8 @@ Return ONLY valid JSON using exactly this structure:
 
 def inspect_receiving(receiving_data, images):
     """
-    Performs exactly ONE Gemini model call for the complete receiving unit.
+    Performs one Gemini model call for the complete receiving unit,
+    with retries for temporary 503 errors.
     """
 
     api_key = os.getenv("GEMINI_API_KEY")
@@ -142,38 +143,50 @@ def inspect_receiving(receiving_data, images):
         prompt = build_prompt(receiving_data)
 
         # -----------------------------------------------------
-        # ONE GEMINI MODEL CALL
+        # GEMINI MODEL CALL WITH RETRY
         # -----------------------------------------------------
         import time
 
-response = None
+        response = None
 
-for attempt in range(4):
-    try:
-        response = client.models.generate_content(
-            model=MODEL_NAME,
-            contents=[prompt] + images,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                max_output_tokens=1500,
-            ),
-        )
-        break
+        for attempt in range(4):
+            try:
+                response = client.models.generate_content(
+                    model=MODEL_NAME,
+                    contents=[prompt] + images,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        temperature=0.1,
+                        max_output_tokens=1500,
+                    ),
+                )
 
-    except Exception as exc:
-        error_text = str(exc)
+                # Successful response
+                break
 
-        if "503" not in error_text and "UNAVAILABLE" not in error_text:
-            raise
+            except Exception as exc:
+                error_text = str(exc)
 
-        if attempt == 3:
-            raise
+                # Retry only temporary 503 errors
+                if (
+                    "503" not in error_text
+                    and "UNAVAILABLE" not in error_text
+                ):
+                    raise
 
-        time.sleep(2 ** attempt)
+                # Last attempt failed
+                if attempt == 3:
+                    raise
+
+                # Wait before retrying
+                time.sleep(2 ** attempt)
 
         # -----------------------------------------------------
-        # READ MODEL RESPONSE
+        # CHECK RESPONSE
         # -----------------------------------------------------
+        if response is None:
+            raise ValueError("Gemini returned no response.")
+
         response_text = response.text
 
         if not response_text:
@@ -195,7 +208,7 @@ for attempt in range(4):
 
     except Exception as exc:
         # -----------------------------------------------------
-        # FAIL-OPEN:
+        # FAIL-OPEN
         # Preserve the receiving capture and request review.
         # -----------------------------------------------------
         return {
