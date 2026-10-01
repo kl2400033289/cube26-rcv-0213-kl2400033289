@@ -1,212 +1,183 @@
 import json
 import os
 from datetime import datetime, timezone
-from pathlib import Path
-from src.database import init_db, save_receiving_record
 
 import pandas as pd
 import streamlit as st
 from PIL import Image
 
+from src.database import init_db, save_receiving_record, get_receiving_records
 from src.receiving_agent import inspect_receiving
-from src.database import get_receiving_records
+
+
+# ============================================================
+# INITIALIZE DATABASE
+# ============================================================
 
 init_db()
 
 
+# ============================================================
+# PAGE CONFIGURATION
+# ============================================================
+
 st.set_page_config(
     page_title="Receiving Manager",
     page_icon="📦",
-    layout="wide",
+    layout="wide"
 )
 
 
-# ---------------------------------------------------------
-# Styling
-# ---------------------------------------------------------
+# ============================================================
+# SESSION STATE INITIALIZATION
+# ============================================================
 
-st.markdown(
-    """
-    <style>
-    .main-title {
-        font-size: 2.4rem;
-        font-weight: 700;
-        margin-bottom: 0;
-    }
+if "last_record" not in st.session_state:
+    st.session_state["last_record"] = None
 
-    .subtitle {
-        color: #777;
-        margin-bottom: 2rem;
-    }
+if "last_images" not in st.session_state:
+    st.session_state["last_images"] = []
 
-    .result-card {
-        padding: 1rem;
-        border-radius: 12px;
-        border: 1px solid #ddd;
-        margin-bottom: 0.7rem;
-    }
+if "inspection_done" not in st.session_state:
+    st.session_state["inspection_done"] = False
 
-    .pass {
-        color: #16803c;
-        font-weight: 700;
-    }
 
-    .fail {
-        color: #c62828;
-        font-weight: 700;
-    }
+# ============================================================
+# HEADER
+# ============================================================
 
-    .uncertain {
-        color: #b26a00;
-        font-weight: 700;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
+st.title("📦 Receiving Manager")
+
+st.write(
+    "AI-assisted receiving inspection using purchase-order information "
+    "and photographic evidence."
 )
 
-
-# ---------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------
-
-def save_evidence(record):
-    Path("data").mkdir(exist_ok=True)
-
-    file_path = Path("data/receiving_records.jsonl")
-
-    with open(file_path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(record) + "\n")
+st.divider()
 
 
-def verdict_icon(verdict):
-    if verdict == "PASS":
-        return "✓"
-    if verdict == "FAIL":
-        return "✕"
-    return "?"
+# ============================================================
+# 1. EXPECTED RECEIVING INFORMATION
+# ============================================================
 
+st.header("1. Expected Receiving Information")
 
-def verdict_class(verdict):
-    return verdict.lower()
+col1, col2, col3 = st.columns(3)
 
+with col1:
+    unit_id = st.text_input(
+        "Unit ID",
+        value="UNIT-0007"
+    )
 
-# ---------------------------------------------------------
-# Header
-# ---------------------------------------------------------
-
-st.markdown(
-    '<div class="main-title">📦 Receiving Manager</div>',
-    unsafe_allow_html=True,
-)
-
-st.markdown(
-    '<div class="subtitle">AI-powered supplier receiving inspection with evidence-backed decisions</div>',
-    unsafe_allow_html=True,
-)
-
-
-# ---------------------------------------------------------
-# Sidebar
-# ---------------------------------------------------------
-
-with st.sidebar:
-    st.header("Receiving Session")
-
-    org_id = st.selectbox(
-        "Organisation",
-        [
-            "org_demo_alpha",
-            "org_demo_bravo",
-        ],
+    org_id = st.text_input(
+        "Organization ID",
+        value="org_demo_alpha"
     )
 
     operator_id = st.text_input(
         "Operator ID",
-        value="operator_demo",
+        value="operator_demo"
     )
 
-    st.divider()
-
-    st.caption(
-        "Tenant isolation is enforced through the organisation context. "
-        "Records must never cross organisations."
+    po_number = st.text_input(
+        "PO Number",
+        value="PO-7001"
     )
-
-
-# ---------------------------------------------------------
-# Expected information
-# ---------------------------------------------------------
-
-st.subheader("1. Purchase Order / Expected Item")
-
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    unit_id = st.text_input("Unit ID", "UNIT-0007")
-    po_number = st.text_input("PO Number", "PO-7001")
-    po_line = st.number_input("PO Line", min_value=1, value=4)
 
 with col2:
-    sku = st.text_input("SKU", "SKU-CABLE-USBC")
-    product_title = st.text_input("Product", "USB-C Cable")
-    spec_colour = st.text_input("Expected Colour", "white")
+    po_line = st.number_input(
+        "PO Line",
+        min_value=1,
+        value=4,
+        step=1
+    )
+
+    sku = st.text_input(
+        "SKU",
+        value="SKU-CABLE-USBC"
+    )
+
+    product_title = st.text_input(
+        "Product",
+        value="USB-C Cable"
+    )
+
+    spec_colour = st.text_input(
+        "Expected Colour",
+        value="white"
+    )
 
 with col3:
-    spec_variant = st.text_input("Expected Variant", "2m")
-    spec_components = st.text_input("Expected Components", "cable")
-    qty_ordered = st.number_input("Quantity Ordered", min_value=1, value=24)
+    spec_variant = st.text_input(
+        "Expected Variant",
+        value="2m"
+    )
 
+    spec_components = st.text_input(
+        "Expected Components",
+        value="cable"
+    )
 
-col1, col2, col3 = st.columns(3)
-
-with col1:
     cartons_ordered = st.number_input(
         "Cartons Ordered",
-        min_value=1,
+        min_value=0,
         value=2,
+        step=1
     )
 
-with col2:
     units_per_carton_ordered = st.number_input(
-        "Units / Carton",
-        min_value=1,
+        "Units Per Carton",
+        min_value=0,
         value=12,
+        step=1
     )
 
-with col3:
-    st.metric(
-        "Expected Total",
-        qty_ordered,
+    qty_ordered = st.number_input(
+        "Quantity Ordered",
+        min_value=0,
+        value=24,
+        step=1
     )
 
+
+# ============================================================
+# BUILD RECEIVING DATA
+# ============================================================
 
 receiving_data = {
     "unit_id": unit_id,
+    "org_id": org_id,
+    "operator_id": operator_id,
+
     "po_number": po_number,
-    "po_line": po_line,
+    "po_line": int(po_line),
+
     "sku": sku,
     "product_title": product_title,
+
     "spec_colour": spec_colour,
     "spec_variant": spec_variant,
     "spec_components": spec_components,
-    "cartons_ordered": cartons_ordered,
-    "units_per_carton_ordered": units_per_carton_ordered,
-    "qty_ordered": qty_ordered,
+
+    "cartons_ordered": int(cartons_ordered),
+    "units_per_carton_ordered": int(units_per_carton_ordered),
+    "qty_ordered": int(qty_ordered)
 }
 
 
-# ---------------------------------------------------------
-# Photos
-# ---------------------------------------------------------
+# ============================================================
+# 2. PHOTO UPLOAD
+# ============================================================
 
-st.subheader("2. Receiving Evidence")
+st.divider()
+
+st.header("2. Receiving Evidence")
 
 uploaded_files = st.file_uploader(
     "Upload receiving photographs",
     type=["jpg", "jpeg", "png", "webp"],
-    accept_multiple_files=True,
-    help="Recommended: pallet/carton photo, carton close-up, and product/unit photo.",
+    accept_multiple_files=True
 )
 
 
@@ -214,193 +185,447 @@ images = []
 
 if uploaded_files:
 
-    preview_cols = st.columns(min(len(uploaded_files), 3))
+    st.write(f"📸 {len(uploaded_files)} photograph(s) uploaded.")
+
+    preview_columns = st.columns(min(len(uploaded_files), 4))
 
     for index, uploaded_file in enumerate(uploaded_files):
 
-        image = Image.open(uploaded_file).convert("RGB")
-        images.append(image)
+        try:
+            image = Image.open(uploaded_file).convert("RGB")
 
-        with preview_cols[index % 3]:
-            st.image(
-                image,
-                caption=uploaded_file.name,
-                use_container_width=True,
+            images.append(image)
+
+            with preview_columns[index % len(preview_columns)]:
+                st.image(
+                    image,
+                    caption=uploaded_file.name,
+                    use_container_width=True
+                )
+
+        except Exception as exc:
+            st.error(
+                f"Could not read {uploaded_file.name}: {exc}"
             )
 
-else:
-    st.info(
-        "Upload at least one clear receiving photograph. "
-        "Three views are recommended for the demo."
-    )
 
-
-# ---------------------------------------------------------
-# Inspection
-# ---------------------------------------------------------
-
-st.subheader("3. Run Receiving Inspection")
-
-run_inspection = st.button(
-    "🔍 Run Receiving Inspection",
-    type="primary",
-    use_container_width=True,
-)
-
-
-if run_inspection:
-
-    if not images:
-        st.error("Please upload at least one receiving photograph.")
-        st.stop()
-
-    with st.spinner("Inspecting the complete receiving unit..."):
-
-        result = inspect_receiving(
-            receiving_data,
-            images,
-        )
-
-    # Preserve capture metadata regardless of model success.
-    record = {
-        "record_id": f"RCV-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}",
-        "unit_id": unit_id,
-        "org_id": org_id,
-        "operator_id": operator_id,
-        "captured_at": datetime.now(timezone.utc).isoformat(),
-        "expected": receiving_data,
-        "result": result,
-        "photo_count": len(images),
-    }
-
-    save_evidence(record)
-
-    st.session_state["last_result"] = result
-    st.session_state["last_record"] = record
-
-
-# ---------------------------------------------------------
-# Results
-# ---------------------------------------------------------
-
-if "last_result" in st.session_state:
-
-    result = st.session_state["last_result"]
-
-    st.divider()
-
-    st.subheader("4. Inspection Result")
-
-    checks = [
-        ("Identity", "identity"),
-        ("Quantity", "quantity"),
-        ("Carton Damage", "carton_damage"),
-        ("Unit Damage", "unit_damage"),
-        ("Quality", "quality"),
-    ]
-
-    for display_name, key in checks:
-
-        check = result.get(
-            key,
-            {
-                "verdict": "UNCERTAIN",
-                "evidence": "No result available.",
-            },
-        )
-
-        verdict = check.get("verdict", "UNCERTAIN")
-        evidence = check.get("evidence", "")
-
-        icon = verdict_icon(verdict)
-        css_class = verdict_class(verdict)
-
-        st.markdown(
-            f"""
-            <div class="result-card">
-                <strong>{display_name}</strong>
-                <br>
-                <span class="{css_class}">
-                    {icon} {verdict}
-                </span>
-                <br>
-                <small>{evidence}</small>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    overall = result.get(
-        "overall_verdict",
-        "REVIEW_REQUIRED",
-    )
-
-    if overall == "PASS":
-        st.success("RECEIVING VERDICT: PASS")
-
-    elif overall == "FAIL":
-        st.error("RECEIVING VERDICT: FAIL")
-
-    else:
-        st.warning(
-            f"RECEIVING VERDICT: {overall}"
-        )
-
-    st.info(
-        result.get(
-            "summary",
-            "Review the evidence before accepting the delivery.",
-        )
-    )
-    st.divider()
-
-st.header("Receiving History")
-
-records = get_receiving_records()
-
-if records:
-    history = []
-
-    for record in records:
-        history.append({
-            "Record ID": record["record_id"],
-            "Unit ID": record["unit_id"],
-            "PO Number": record["po_number"],
-            "SKU": record["sku"],
-            "Product": record["product_title"],
-            "Verdict": record["overall_verdict"],
-            "Captured At": record["captured_at"]
-        })
-
-    st.dataframe(
-        pd.DataFrame(history),
-        use_container_width=True
-    )
-else:
-    st.info("No receiving records yet.")
-
-    # -----------------------------------------------------
-    # Evidence record
-    # -----------------------------------------------------
-
-    st.subheader("5. Evidence Record")
-
-    record = st.session_state["last_record"]
-
-    st.json(record)
-
-    st.caption(
-        "The original model verdict is retained as evidence. "
-        "Operator overrides should create a new record rather than silently replacing it."
-    )
-
-
-# ---------------------------------------------------------
-# Footer
-# ---------------------------------------------------------
+# ============================================================
+# 3. RUN INSPECTION
+# ============================================================
 
 st.divider()
 
-st.caption(
-    "CUBE Buildathon · 01 Receiving Manager · Round 2"
+st.header("3. AI Inspection")
+
+inspect_button = st.button(
+    "🔍 Run Receiving Inspection",
+    type="primary",
+    use_container_width=True
 )
+
+
+if inspect_button:
+
+    if not images:
+        st.warning(
+            "Please upload at least one receiving photograph before "
+            "running the inspection."
+        )
+
+    else:
+
+        with st.spinner(
+            "Inspecting receiving evidence with Gemini..."
+        ):
+
+            try:
+
+                # ------------------------------------------------
+                # CALL GEMINI
+                # ------------------------------------------------
+
+                result = inspect_receiving(
+                    receiving_data,
+                    images
+                )
+
+                # ------------------------------------------------
+                # CREATE EVIDENCE RECORD
+                # ------------------------------------------------
+
+                record_id = (
+                    "RCV-"
+                    + datetime.now(timezone.utc)
+                    .strftime("%Y%m%d%H%M%S")
+                )
+
+                captured_at = (
+                    datetime.now(timezone.utc)
+                    .isoformat()
+                )
+
+                record = {
+                    "record_id": record_id,
+
+                    "unit_id": unit_id,
+                    "org_id": org_id,
+                    "operator_id": operator_id,
+
+                    "captured_at": captured_at,
+
+                    "expected": {
+                        "unit_id": unit_id,
+                        "po_number": po_number,
+                        "po_line": int(po_line),
+
+                        "sku": sku,
+                        "product_title": product_title,
+
+                        "spec_colour": spec_colour,
+                        "spec_variant": spec_variant,
+                        "spec_components": spec_components,
+
+                        "cartons_ordered": int(
+                            cartons_ordered
+                        ),
+
+                        "units_per_carton_ordered": int(
+                            units_per_carton_ordered
+                        ),
+
+                        "qty_ordered": int(
+                            qty_ordered
+                        )
+                    },
+
+                    "result": result,
+
+                    "photo_count": len(images)
+                }
+
+                # ------------------------------------------------
+                # SAVE TO SESSION STATE
+                # ------------------------------------------------
+
+                st.session_state["last_record"] = record
+                st.session_state["last_images"] = images
+                st.session_state["inspection_done"] = True
+
+                # ------------------------------------------------
+                # SAVE TO DATABASE
+                # ------------------------------------------------
+
+                save_receiving_record(record)
+
+                st.success(
+                    "Inspection completed and evidence record saved."
+                )
+
+            except Exception as exc:
+
+                st.error(
+                    f"Inspection failed unexpectedly: {exc}"
+                )
+
+
+# ============================================================
+# 4. INSPECTION RESULT
+# ============================================================
+
+if st.session_state["inspection_done"]:
+
+    record = st.session_state.get("last_record")
+
+    if record:
+
+        result = record.get("result", {})
+
+        st.divider()
+
+        st.header("4. Inspection Result")
+
+        # --------------------------------------------------------
+        # HELPER FUNCTION
+        # --------------------------------------------------------
+
+        def show_verdict(title, data):
+
+            if not data:
+                st.warning(
+                    f"{title}: No result available."
+                )
+                return
+
+            verdict = data.get(
+                "verdict",
+                "UNCERTAIN"
+            )
+
+            evidence = data.get(
+                "evidence",
+                "No evidence provided."
+            )
+
+            if verdict == "PASS":
+
+                st.success(
+                    f"✓ {title}\n\n"
+                    f"**PASS**\n\n"
+                    f"{evidence}"
+                )
+
+            elif verdict == "FAIL":
+
+                st.error(
+                    f"✕ {title}\n\n"
+                    f"**FAIL**\n\n"
+                    f"{evidence}"
+                )
+
+            else:
+
+                st.warning(
+                    f"? {title}\n\n"
+                    f"**UNCERTAIN**\n\n"
+                    f"{evidence}"
+                )
+
+        # --------------------------------------------------------
+        # FIVE INSPECTION CHECKS
+        # --------------------------------------------------------
+
+        show_verdict(
+            "Identity",
+            result.get("identity")
+        )
+
+        show_verdict(
+            "Quantity",
+            result.get("quantity")
+        )
+
+        show_verdict(
+            "Carton Damage",
+            result.get("carton_damage")
+        )
+
+        show_verdict(
+            "Unit Damage",
+            result.get("unit_damage")
+        )
+
+        show_verdict(
+            "Quality",
+            result.get("quality")
+        )
+
+        # --------------------------------------------------------
+        # OVERALL RESULT
+        # --------------------------------------------------------
+
+        overall_verdict = result.get(
+            "overall_verdict",
+            "REVIEW_REQUIRED"
+        )
+
+        summary = result.get(
+            "summary",
+            "No summary available."
+        )
+
+        st.subheader("Receiving Verdict")
+
+        if overall_verdict == "PASS":
+
+            st.success(
+                f"✓ RECEIVING VERDICT: PASS\n\n"
+                f"{summary}"
+            )
+
+        elif overall_verdict == "FAIL":
+
+            st.error(
+                f"✕ RECEIVING VERDICT: FAIL\n\n"
+                f"{summary}"
+            )
+
+        else:
+
+            st.warning(
+                f"? RECEIVING VERDICT: {overall_verdict}\n\n"
+                f"{summary}"
+            )
+
+
+# ============================================================
+# 5. EVIDENCE RECORD
+# ============================================================
+
+if st.session_state.get("last_record") is not None:
+
+    record = st.session_state["last_record"]
+
+    st.divider()
+
+    st.header("5. Evidence Record")
+
+    with st.expander(
+        "View complete evidence JSON",
+        expanded=False
+    ):
+
+        st.json(record)
+
+    # --------------------------------------------------------
+    # RECORD INFORMATION
+    # --------------------------------------------------------
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+
+        st.metric(
+            "Record ID",
+            record.get("record_id", "N/A")
+        )
+
+    with col2:
+
+        st.metric(
+            "Unit ID",
+            record.get("unit_id", "N/A")
+        )
+
+    with col3:
+
+        result = record.get("result", {})
+
+        st.metric(
+            "Verdict",
+            result.get(
+                "overall_verdict",
+                "REVIEW_REQUIRED"
+            )
+        )
+
+    st.caption(
+        f"Captured at: "
+        f"{record.get('captured_at', 'N/A')}"
+    )
+
+
+# ============================================================
+# 6. RECEIVING HISTORY
+# ============================================================
+
+st.divider()
+
+st.header("6. Receiving History")
+
+try:
+
+    records = get_receiving_records()
+
+    if records:
+
+        history = []
+
+        for record in records:
+
+            history.append({
+                "Record ID": record.get(
+                    "record_id"
+                ),
+
+                "Unit ID": record.get(
+                    "unit_id"
+                ),
+
+                "PO Number": record.get(
+                    "po_number"
+                ),
+
+                "PO Line": record.get(
+                    "po_line"
+                ),
+
+                "SKU": record.get(
+                    "sku"
+                ),
+
+                "Product": record.get(
+                    "product_title"
+                ),
+
+                "Verdict": record.get(
+                    "overall_verdict"
+                ),
+
+                "Captured At": record.get(
+                    "captured_at"
+                )
+            })
+
+        history_df = pd.DataFrame(history)
+
+        st.dataframe(
+            history_df,
+            use_container_width=True,
+            hide_index=True
+        )
+
+    else:
+
+        st.info(
+            "No receiving records yet."
+        )
+
+except Exception as exc:
+
+    st.error(
+        f"Could not load receiving history: {exc}"
+    )
+
+
+# ============================================================
+# 7. SYSTEM INFORMATION
+# ============================================================
+
+st.divider()
+
+st.header("7. System Information")
+
+col1, col2, col3 = st.columns(3)
+
+with col1:
+
+    st.write(
+        "**AI Model**"
+    )
+
+    st.code(
+        os.getenv(
+            "GEMINI_MODEL",
+            "gemini-3.8-flash"
+        )
+    )
+
+with col2:
+
+    st.write(
+        "**Inspection Mode**"
+    )
+
+    st.write(
+        "Single model call with temporary-error retry"
+    )
+
+with col3:
+
+    st.write(
+        "**Evidence Policy**"
+    )
+
+    st.write(
+        "Original AI result is preserved"
+    )
