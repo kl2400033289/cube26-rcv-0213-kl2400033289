@@ -17,8 +17,9 @@ def init_db():
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS receiving_records (
-            record_id TEXT PRIMARY KEY,
-            unit_id TEXT NOT NULL,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            record_id TEXT UNIQUE,
+            unit_id TEXT,
             org_id TEXT,
             operator_id TEXT,
             captured_at TEXT,
@@ -29,31 +30,12 @@ def init_db():
             product_title TEXT,
 
             cartons_ordered INTEGER,
-            cartons_received INTEGER,
             units_per_carton_ordered INTEGER,
-            units_per_carton_counted INTEGER,
             qty_ordered INTEGER,
-            qty_received INTEGER,
 
-            identity_verdict TEXT,
-            identity_evidence TEXT,
-
-            quantity_verdict TEXT,
-            quantity_evidence TEXT,
-
-            carton_damage_verdict TEXT,
-            carton_damage_evidence TEXT,
-
-            unit_damage_verdict TEXT,
-            unit_damage_evidence TEXT,
-
-            quality_verdict TEXT,
-            quality_evidence TEXT,
-
+            result_json TEXT,
             overall_verdict TEXT,
-            summary TEXT,
 
-            model TEXT,
             photo_count INTEGER,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
@@ -63,12 +45,10 @@ def init_db():
     conn.close()
 
 
-def save_receiving_record(
-    record_id,
-    receiving_data,
-    result,
-    photo_count=0
-):
+def save_receiving_record(record):
+    expected = record.get("expected", {})
+    result = record.get("result", {})
+
     conn = get_connection()
 
     conn.execute("""
@@ -78,128 +58,52 @@ def save_receiving_record(
             org_id,
             operator_id,
             captured_at,
-
             po_number,
             po_line,
             sku,
             product_title,
-
             cartons_ordered,
-            cartons_received,
             units_per_carton_ordered,
-            units_per_carton_counted,
             qty_ordered,
-            qty_received,
-
-            identity_verdict,
-            identity_evidence,
-
-            quantity_verdict,
-            quantity_evidence,
-
-            carton_damage_verdict,
-            carton_damage_evidence,
-
-            unit_damage_verdict,
-            unit_damage_evidence,
-
-            quality_verdict,
-            quality_evidence,
-
+            result_json,
             overall_verdict,
-            summary,
-
-            model,
             photo_count
         )
-        VALUES (
-            ?, ?, ?, ?, ?,
-            ?, ?, ?, ?,
-            ?, ?, ?, ?, ?, ?,
-            ?, ?,
-            ?, ?,
-            ?, ?,
-            ?, ?,
-            ?, ?,
-            ?, ?,
-            ?, ?,
-            ?, ?
-        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
-        record_id,
-        receiving_data.get("unit_id"),
-        receiving_data.get("org_id"),
-        receiving_data.get("operator_id"),
-        receiving_data.get("captured_at"),
+        record.get("record_id"),
+        record.get("unit_id"),
+        record.get("org_id"),
+        record.get("operator_id"),
+        record.get("captured_at"),
 
-        receiving_data.get("po_number"),
-        receiving_data.get("po_line"),
-        receiving_data.get("sku"),
-        receiving_data.get("product_title"),
+        expected.get("po_number"),
+        expected.get("po_line"),
+        expected.get("sku"),
+        expected.get("product_title"),
 
-        receiving_data.get("cartons_ordered"),
-        result.get("cartons_received"),
-        receiving_data.get("units_per_carton_ordered"),
-        result.get("units_per_carton_counted"),
-        receiving_data.get("qty_ordered"),
-        result.get("qty_received"),
+        expected.get("cartons_ordered"),
+        expected.get("units_per_carton_ordered"),
+        expected.get("qty_ordered"),
 
-        result.get("identity", {}).get("verdict"),
-        result.get("identity", {}).get("evidence"),
-
-        result.get("quantity", {}).get("verdict"),
-        result.get("quantity", {}).get("evidence"),
-
-        result.get("carton_damage", {}).get("verdict"),
-        result.get("carton_damage", {}).get("evidence"),
-
-        result.get("unit_damage", {}).get("verdict"),
-        result.get("unit_damage", {}).get("evidence"),
-
-        result.get("quality", {}).get("verdict"),
-        result.get("quality", {}).get("evidence"),
-
+        json.dumps(result),
         result.get("overall_verdict"),
-        result.get("summary"),
 
-        result.get("model"),
-        photo_count
+        record.get("photo_count", 0)
     ))
 
     conn.commit()
     conn.close()
 
 
-def get_record(record_id):
+def get_receiving_records():
     conn = get_connection()
 
-    row = conn.execute(
-        """
-        SELECT * FROM receiving_records
-        WHERE record_id = ?
-        """,
-        (record_id,)
-    ).fetchone()
-
-    conn.close()
-
-    if row:
-        return dict(row)
-
-    return None
-
-
-def get_records_by_unit(unit_id):
-    conn = get_connection()
-
-    rows = conn.execute(
-        """
-        SELECT * FROM receiving_records
-        WHERE unit_id = ?
+    rows = conn.execute("""
+        SELECT *
+        FROM receiving_records
         ORDER BY created_at DESC
-        """,
-        (unit_id,)
-    ).fetchall()
+    """).fetchall()
 
     conn.close()
 
